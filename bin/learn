@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage() {
+  cat <<'EOF'
+Usage: learn "topic"
+
+Generate an interactive lesson in lessons/<topic-slug>/ with Codex.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help|'')
+    usage
+    if [[ "${1:-}" == "" ]]; then
+      exit 1
+    fi
+    exit 0
+    ;;
+  *)
+    topic="$1"
+    slug="$(printf '%s' "$topic" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')"
+    if [[ -z "$slug" ]]; then
+      echo "Topic must contain letters or numbers." >&2
+      exit 1
+    fi
+
+    lessons_dir="${LESSONS_DIR:-$root/lessons}"
+    output_dir="$lessons_dir/$slug"
+    if [[ -e "$output_dir" ]]; then
+      echo "Refusing to overwrite existing lesson: $output_dir" >&2
+      exit 1
+    fi
+    if ! command -v codex >/dev/null 2>&1; then
+      echo "Codex CLI was not found. Install and authenticate Codex, then retry." >&2
+      exit 1
+    fi
+
+    mkdir -p "$output_dir"
+    contract="$root/prompts/lesson-contract.md"
+    prompt="$(cat "$contract")
+
+Topic: $topic
+Output directory: $output_dir
+Write the finished lesson to $output_dir/index.html."
+
+    if ! (cd "$root" && codex exec --ask-for-approval never --sandbox workspace-write "$prompt"); then
+      echo "Codex generation failed. Partial files, if any, remain in $output_dir." >&2
+      exit 1
+    fi
+    if [[ ! -f "$output_dir/index.html" ]]; then
+      echo "Codex finished without creating $output_dir/index.html." >&2
+      exit 1
+    fi
+
+    echo "Lesson generated: $output_dir/index.html"
+    if [[ "${NO_OPEN:-0}" != "1" ]]; then
+      if command -v open >/dev/null 2>&1; then
+        open "$output_dir/index.html"
+      elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$output_dir/index.html"
+      fi
+    fi
+    ;;
+esac
